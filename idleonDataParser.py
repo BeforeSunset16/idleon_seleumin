@@ -1,5 +1,5 @@
 import json
-from  website_data import const_items, const_traps, const_randomList, const_refinery, const_monsters, const_classes,const_seedInfo
+from  website_data import const_items, const_traps, const_randomList, const_refinery, const_monsters, const_classes, const_seedInfo, const_bubResources, const_bubbleCosts
 from datetime import datetime, timedelta
 from functools import reduce
 import re
@@ -22,85 +22,23 @@ def parse_all(raw_json):
     
     idleonData = parsed_data['data']
     charNames = parsed_data['charNames']
+
     storage_data = get_storage(idleonData,'storage')
 
     serialized_characters_data = get_characters(idleonData, charNames)
+
     traps_data = parse_traps(serialized_characters_data)
-    breedingRaw = idleonData.get('Breeding') or try_to_parse(idleonData.get('Breeding'))
-    eggs = breedingRaw[0] if breedingRaw is not None else None
-    refinery_raw = try_to_parse(idleonData.get('Refinery')) or idleonData.get('Refinery')
-    salts=parse_refinery(refinery_raw, storage_data)
-    alchemy_raw = create_array_of_arrays(idleonData.get('CauldronInfo')) or idleonData.get('CauldronInfo')
-    liquids = alchemy_raw[6] if alchemy_raw and len(alchemy_raw) > 6 else None
+    eggs = get_eggs(idleonData)
+    salts = get_salts(idleonData, storage_data)
+    liquids = get_liquids(idleonData)
+    charactersLevels = get_charactersLevels(serialized_characters_data)
+    charactersData = get_charactersData(serialized_characters_data)
+    plot = get_plot(idleonData)
+    jade_coins = get_jade_coins(idleonData)
 
+    charactersImportant = get_charactersImportant(serialized_characters_data)
+    alchemyResource = get_alchemyResource(idleonData, jade_coins)
 
-    charactersLevels = []
-    for char in serialized_characters_data:
-        character_class = char.get('CharacterClass', None)
-        if isinstance(character_class, int) and character_class < len(const_classes):
-            class_name = const_classes[character_class]
-        else:
-            class_name = ''
-        
-        charactersLevels.append({
-            'level': char.get('PersonalValuesMap', {}).get('StatList', [0]*5)[4],
-            'class': class_name
-        })
-
-    characters = {}
-    for char in serialized_characters_data:
-        char_name = char.get('name', f"Player{char.get('playerId', 'Unknown')}")
-        characters[char_name] = {
-            'afkTime': calculate_afk_time(char.get('PlayerAwayTime', 0)),
-            'afkTarget': const_monsters.get(char.get('AFKtarget', {})).get('Name', ''),
-            'afkType': const_monsters.get(char.get('AFKtarget', {})).get('AFKtype', '')
-        }
-
-    # raw_farming_plot 和 raw_farming_ranks 是解析后的数据
-    raw_farming_plot = try_to_parse(idleonData.get('FarmPlot'))
-    raw_farming_ranks = try_to_parse(idleonData.get('FarmRank'))
-
-    farming_ranks, ranks_progress, upgrades_levels = raw_farming_ranks or ([], [], [])
-
-    # 确保 raw_farming_plot 是一个列表，并且每个元素是一个包含7个元素的列表
-    plot = []
-    for index, item in enumerate(raw_farming_plot or []):
-        if index < len(farming_ranks) and index < len(ranks_progress):
-            seed_type, progress, crop_type, is_locked, crop_quantity, current_og, crop_progress = item
-            rank = farming_ranks[index]
-            rank_progress = ranks_progress[index]
-            
-            # 使用种子类型作为索引访问 const_seed_info 列表
-            seed_info = const_seedInfo[seed_type] if seed_type < len(const_seedInfo) else {}
-            type_value = round(seed_info.get('cropIdMin', 0) + crop_type)
-            
-            rank_requirement = (7 * rank + 25 * (rank // 5) + 10) * math.pow(1.11, rank)
-            growth_req = 14400 * math.pow(1.5, seed_type)
-            
-            plot.append({
-                'rank': rank,
-                'rankProgress': rank_progress,
-                'rankRequirement': rank_requirement,
-                'seedType': seed_type,
-                'cropType': type_value,
-                'cropQuantity': crop_quantity,
-                'cropProgress': crop_progress,
-                'progress': progress,
-                'growthReq': growth_req,
-                'isLocked': is_locked,
-                'currentOG': current_og,
-                'cropRawName': f'FarmCrop{type_value}.png',
-                'seedRawName': f'Seed_{seed_type}.png'
-            })
-
-    raw_sneaking = try_to_parse(idleonData.get('Ninja', None))
-    if isinstance(raw_sneaking, list) and len(raw_sneaking) > 102:
-        # 获取索引为 102 的元素
-        ninja_data = raw_sneaking[102]
-        # 获取索引为 1 的值（
-        jade_coins = ninja_data[1]
-    else:
-        jade_coins = None
     account = {
         "alchemy": {
             "liquids":liquids
@@ -121,12 +59,20 @@ def parse_all(raw_json):
         
     }
 
-    object_data = {
-        "account": account,
-        "characters": characters,
+    importantData = {
+        "liquids": liquids,
+        "charactersImportant": charactersImportant,
+        "jadeCoins": jade_coins,
+        "alchemyResource": alchemyResource
     }
 
-    return object_data
+    object_data = {
+        "account": account,
+        "characters": charactersData,
+        "important": importantData,
+    }
+
+    return importantData
 
 
 
@@ -196,6 +142,46 @@ def get_inventory(inventory_arr, inventory_quantity_arr, owner):
                 'amount': int(inventory_quantity_arr[index]) if inventory_quantity_arr else 0,
             })
     return result
+
+def get_alchemyResource(idleon_data, jadeCoins):
+    chest_order_raw =  idleon_data.get('ChestOrder') or try_to_parse(idleon_data.get('ChestOrder'))
+    chest_quantity_raw = idleon_data.get('ChestQuantity') or try_to_parse(idleon_data.get('ChestQuantity'))
+    return get_bubblecosts(chest_order_raw, chest_quantity_raw, jadeCoins)
+
+def get_bubblecosts(inventory_arr, inventory_quantity_arr, jadeCoins):
+    cost_result = {}
+    click_down_page_times = 5
+    click_up_page_times  = 0
+    for index, item_name in enumerate(inventory_arr):
+        it = const_items.get(item_name, {})
+        displayName = it.get('displayName')
+        if item_name not in ['LockedInvSpace', 'Blank']:
+            if displayName in const_bubResources:
+                amount = int(inventory_quantity_arr[index]) if inventory_quantity_arr else 0
+                if amount >= 1e9:
+                    resource_info = const_bubbleCosts.get(displayName)
+                    bubble_name = resource_info.get("name")
+                    bubble_color = resource_info.get("color")
+                    cost_result[bubble_name] = {
+                        "colour": bubble_color,
+                        "click_down_page_times": click_down_page_times,
+                        "click_up_page_times": click_up_page_times
+                    }
+                    #cost_result.append(f"{bubble_name}:{{colour: {bubble_color}, click_down_page_times:5, click_up_page_times:0}}")
+
+    if jadeCoins >= 1e9:
+        bubble_name = 'essence_chapter'
+        bubble_color = 'purple'
+        cost_result[bubble_name] = {
+                        "colour": bubble_color,
+                        "click_down_page_times": click_down_page_times,
+                        "click_up_page_times": click_up_page_times
+                    }
+        
+    return cost_result
+
+
+
 def create_array_of_arrays(array):
     if array is None:
         return None
@@ -291,6 +277,7 @@ def get_characters(idleonData, charNames):
         })
     
     return characters
+
 def parse_traps(raw_characters_data):
     parsed_traps = []
     for char in raw_characters_data:
@@ -396,6 +383,35 @@ def create_array_of_arrays(array):
         result.append(list(obj.values()) if isinstance(obj, dict) else obj)
     
     return result
+
+def get_charactersLevels(serialized_characters_data):
+    charactersLevels = []
+    for char in serialized_characters_data:
+        character_class = char.get('CharacterClass', None)
+        if isinstance(character_class, int) and character_class < len(const_classes):
+            class_name = const_classes[character_class]
+        else:
+            class_name = ''
+        
+        charactersLevels.append({
+            'level': char.get('PersonalValuesMap', {}).get('StatList', [0]*5)[4],
+            'class': class_name
+        })
+    return charactersLevels
+
+def get_charactersImportant(serialized_characters_data):
+    charactersImportant = {}
+    number = 1
+    for char in serialized_characters_data:
+        character_class = char.get('CharacterClass', None)
+        if isinstance(character_class, int) and character_class < len(const_classes):
+            class_name = const_classes[character_class]
+        else:
+            class_name = ''
+        charactersImportant[number] = class_name
+        number = number + 1
+    return charactersImportant
+
 def get_characters(idleon_data, chars_names=None):
     if chars_names is None:
         chars_names = list(range(9))
@@ -475,5 +491,82 @@ def get_characters(idleon_data, chars_names=None):
         })
 
     return characters
+
+def get_charactersData(serialized_characters_data):
+    characters = {}
+    for char in serialized_characters_data:
+        char_name = char.get('name', f"Player{char.get('playerId', 'Unknown')}")
+        characters[char_name] = {
+            'afkTime': calculate_afk_time(char.get('PlayerAwayTime', 0)),
+            'afkTarget': const_monsters.get(char.get('AFKtarget', {})).get('Name', ''),
+            'afkType': const_monsters.get(char.get('AFKtarget', {})).get('AFKtype', '')
+        }
+    return characters
+
 def calculate_afk_time(player_time):
     return float(player_time) * 1e3
+
+def get_eggs(idleonData):
+    breedingRaw = idleonData.get('Breeding') or try_to_parse(idleonData.get('Breeding'))
+    eggs = breedingRaw[0] if breedingRaw is not None else None
+    return eggs
+
+def get_salts(idleonData, storage_data):
+    refinery_raw = try_to_parse(idleonData.get('Refinery')) or idleonData.get('Refinery')
+    salts=parse_refinery(refinery_raw, storage_data)
+    return salts
+
+def get_liquids(idleonData):
+    alchemy_raw = create_array_of_arrays(idleonData.get('CauldronInfo')) or idleonData.get('CauldronInfo')
+    liquidsList = alchemy_raw[6] if alchemy_raw and len(alchemy_raw) > 6 else None
+    liquidName = ['water_droplets', 'liquid_nitrogen', 'trench_seawater', 'toxic_mercury']
+    liquids = dict(zip(liquidName, liquidsList))
+    return liquids
+
+def get_plot(idleonData):
+# raw_farming_plot 和 raw_farming_ranks 是解析后的数据
+    raw_farming_plot = try_to_parse(idleonData.get('FarmPlot'))
+    raw_farming_ranks = try_to_parse(idleonData.get('FarmRank'))
+    farming_ranks, ranks_progress, upgrades_levels = raw_farming_ranks or ([], [], [])
+    # 确保 raw_farming_plot 是一个列表，并且每个元素是一个包含7个元素的列表
+    plot = []
+    for index, item in enumerate(raw_farming_plot or []):
+        if index < len(farming_ranks) and index < len(ranks_progress):
+            seed_type, progress, crop_type, is_locked, crop_quantity, current_og, crop_progress = item
+            rank = farming_ranks[index]
+            rank_progress = ranks_progress[index]
+            
+            # 使用种子类型作为索引访问 const_seed_info 列表
+            seed_info = const_seedInfo[seed_type] if seed_type < len(const_seedInfo) else {}
+            type_value = round(seed_info.get('cropIdMin', 0) + crop_type)
+            
+            rank_requirement = (7 * rank + 25 * (rank // 5) + 10) * math.pow(1.11, rank)
+            growth_req = 14400 * math.pow(1.5, seed_type)
+            
+            plot.append({
+                'rank': rank,
+                'rankProgress': rank_progress,
+                'rankRequirement': rank_requirement,
+                'seedType': seed_type,
+                'cropType': type_value,
+                'cropQuantity': crop_quantity,
+                'cropProgress': crop_progress,
+                'progress': progress,
+                'growthReq': growth_req,
+                'isLocked': is_locked,
+                'currentOG': current_og,
+                'cropRawName': f'FarmCrop{type_value}.png',
+                'seedRawName': f'Seed_{seed_type}.png'
+            })
+    return plot
+
+def get_jade_coins(idleonData):
+    raw_sneaking = try_to_parse(idleonData.get('Ninja', None))
+    if isinstance(raw_sneaking, list) and len(raw_sneaking) > 102:
+        # 获取索引为 102 的元素
+        ninja_data = raw_sneaking[102]
+        # 获取索引为 1 的值（
+        jade_coins = ninja_data[1]
+    else:
+        jade_coins = None
+    return jade_coins
