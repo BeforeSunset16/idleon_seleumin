@@ -38,6 +38,7 @@ def parse_all(raw_json):
 
     charactersImportant = get_charactersImportant(serialized_characters_data)
     alchemyResource = get_alchemyResource(idleonData, jade_coins)
+    lastUpdate = get_lastUpdate(parsed_data)
 
     account = {
         "alchemy": {
@@ -63,7 +64,8 @@ def parse_all(raw_json):
         "liquids": liquids,
         "charactersImportant": charactersImportant,
         "jadeCoins": jade_coins,
-        "alchemyResource": alchemyResource
+        "alchemyResource": alchemyResource,
+        "lastUpdate": lastUpdate
     }
 
     object_data = {
@@ -72,7 +74,8 @@ def parse_all(raw_json):
         "important": importantData,
     }
 
-    return importantData
+    return object_data
+
 
 
 
@@ -167,7 +170,6 @@ def get_bubblecosts(inventory_arr, inventory_quantity_arr, jadeCoins):
                         "click_down_page_times": click_down_page_times,
                         "click_up_page_times": click_up_page_times
                     }
-                    #cost_result.append(f"{bubble_name}:{{colour: {bubble_color}, click_down_page_times:5, click_up_page_times:0}}")
 
     if jadeCoins >= 1e9:
         bubble_name = 'essence_chapter'
@@ -570,3 +572,7 @@ def get_jade_coins(idleonData):
     else:
         jade_coins = None
     return jade_coins
+
+def get_lastUpdate(parsed_data):
+    last_update = parsed_data['lastUpdated']
+    return  last_update
